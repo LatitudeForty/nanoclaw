@@ -39,6 +39,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  model?: string;
   script?: string;
 }
 
@@ -673,6 +674,7 @@ export function writeTasksSnapshot(
     script?: string | null;
     schedule_type: string;
     schedule_value: string;
+    model?: string | null;
     status: string;
     next_run: string | null;
   }>,

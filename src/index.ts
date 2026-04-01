@@ -72,7 +72,6 @@ let messageLoopRunning = false;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
-
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
   const agentTs = getRouterState('last_agent_timestamp');
@@ -305,6 +304,7 @@ async function runAgent(
       prompt: t.prompt,
       schedule_type: t.schedule_type,
       schedule_value: t.schedule_value,
+      model: t.model,
       status: t.status,
       next_run: t.next_run,
     })),
@@ -658,6 +658,7 @@ async function main(): Promise<void> {
         prompt: t.prompt,
         schedule_type: t.schedule_type,
         schedule_value: t.schedule_value,
+        model: t.model,
         status: t.status,
         next_run: t.next_run,
       }));

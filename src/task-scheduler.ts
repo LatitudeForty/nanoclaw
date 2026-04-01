@@ -142,6 +142,7 @@ async function runTask(
       script: t.script,
       schedule_type: t.schedule_type,
       schedule_value: t.schedule_value,
+      model: t.model,
       status: t.status,
       next_run: t.next_run,
     })),
@@ -180,6 +181,7 @@ async function runTask(
         isMain,
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
+        model: task.model || undefined,
         script: task.script || undefined,
       },
       (proc, containerName) =>

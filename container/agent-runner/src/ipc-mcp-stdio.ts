@@ -90,6 +90,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     schedule_type: z.enum(['cron', 'interval', 'once']).describe('cron=recurring at specific times, interval=recurring every N ms, once=run once at specific time'),
     schedule_value: z.string().describe('cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: local timestamp like "2026-02-01T15:30:00" (no Z suffix!)'),
     context_mode: z.enum(['group', 'isolated']).default('group').describe('group=runs with chat history and memory, isolated=fresh session (include context in prompt)'),
+    model: z.string().optional().describe('Claude model to use for this task. Examples: "claude-haiku-4-5-20251001" (fast/cheap), "claude-sonnet-4-6" (balanced), "claude-opus-4-6" (most capable). Defaults to the system default if not specified.'),
     target_group_jid: z.string().optional().describe('(Main group only) JID of the group to schedule the task for. Defaults to the current group.'),
     script: z.string().optional().describe('Optional bash script to run before waking the agent. Script must output JSON on the last line of stdout: { "wakeAgent": boolean, "data"?: any }. If wakeAgent is false, the agent is not called. Test your script with bash -c "..." before scheduling.'),
   },
@@ -141,6 +142,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       schedule_type: args.schedule_type,
       schedule_value: args.schedule_value,
       context_mode: args.context_mode || 'group',
+      model: args.model || undefined,
       targetJid,
       createdBy: groupFolder,
       timestamp: new Date().toISOString(),
@@ -257,6 +259,7 @@ server.tool(
     prompt: z.string().optional().describe('New prompt for the task'),
     schedule_type: z.enum(['cron', 'interval', 'once']).optional().describe('New schedule type'),
     schedule_value: z.string().optional().describe('New schedule value (see schedule_task for format)'),
+    model: z.string().optional().describe('Claude model to use. Examples: "claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-6". Set to empty string to reset to default.'),
     script: z.string().optional().describe('New script for the task. Set to empty string to remove the script.'),
   },
   async (args) => {
@@ -294,6 +297,7 @@ server.tool(
     if (args.script !== undefined) data.script = args.script;
     if (args.schedule_type !== undefined) data.schedule_type = args.schedule_type;
     if (args.schedule_value !== undefined) data.schedule_value = args.schedule_value;
+    if (args.model !== undefined) data.model = args.model;
 
     writeIpcFile(TASKS_DIR, data);
 
