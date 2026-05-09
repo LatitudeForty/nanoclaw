@@ -64,6 +64,9 @@ export interface ScheduledTask {
   schedule_value: string;
   context_mode: 'group' | 'isolated';
   model?: string | null;
+  base_url?: string | null;
+  api_key?: string | null;
+  auth_token?: string | null;
   next_run: string | null;
   last_run: string | null;
   last_result: string | null;

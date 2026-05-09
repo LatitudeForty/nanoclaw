@@ -41,6 +41,9 @@ export interface ContainerInput {
   assistantName?: string;
   model?: string;
   script?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  authToken?: string;
 }
 
 export interface ContainerOutput {

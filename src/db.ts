@@ -107,6 +107,25 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Per-task SDK provider override columns. When set, the runner injects them
+  // into Options.env so the SDK's spawned claude CLI subprocess routes to a
+  // non-Anthropic endpoint (e.g. local Ollama). NULL → identical to Anthropic.
+  try {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN base_url TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN api_key TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN auth_token TEXT`);
+  } catch {
+    /* column already exists */
+  }
+
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(

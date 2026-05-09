@@ -183,6 +183,9 @@ async function runTask(
         assistantName: ASSISTANT_NAME,
         model: task.model || undefined,
         script: task.script || undefined,
+        baseUrl: task.base_url || undefined,
+        apiKey: task.api_key || undefined,
+        authToken: task.auth_token || undefined,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),

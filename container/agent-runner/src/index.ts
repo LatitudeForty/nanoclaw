@@ -30,6 +30,9 @@ interface ContainerInput {
   assistantName?: string;
   model?: string;
   script?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  authToken?: string;
 }
 
 interface ContainerOutput {
@@ -542,6 +545,13 @@ async function main(): Promise<void> {
   // Credentials are injected by the host's credential proxy via ANTHROPIC_BASE_URL.
   // No real secrets exist in the container environment.
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
+
+  // Per-task SDK provider override. When set on the scheduled_tasks row, route
+  // the SDK's spawned claude CLI subprocess to a non-Anthropic endpoint via
+  // env passthrough. Verified against Ollama 0.23.2 in the 9 May 2026 verify-first.
+  if (containerInput.baseUrl) sdkEnv.ANTHROPIC_BASE_URL = containerInput.baseUrl;
+  if (containerInput.apiKey) sdkEnv.ANTHROPIC_API_KEY = containerInput.apiKey;
+  if (containerInput.authToken) sdkEnv.ANTHROPIC_AUTH_TOKEN = containerInput.authToken;
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
