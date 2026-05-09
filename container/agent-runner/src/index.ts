@@ -397,12 +397,17 @@ async function runQuery(
     options: {
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
+      // Workaround for https://github.com/anthropics/claude-agent-sdk-typescript/issues/306
+      // SDK 0.2.119 mis-selects linux-arm64-musl on Debian glibc arm64.
+      pathToClaudeCodeExecutable: process.platform === 'linux' && process.arch === 'arm64'
+        ? '/app/node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64/claude'
+        : undefined,
       model: containerInput.model || undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
       systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
-        : undefined,
+        ? { type: 'preset' as const, preset: 'claude_code' as const, excludeDynamicSections: true, append: globalClaudeMd }
+        : { type: 'preset' as const, preset: 'claude_code' as const, excludeDynamicSections: true },
       allowedTools: [
         'Bash',
         'Read', 'Write', 'Edit', 'Glob', 'Grep',
