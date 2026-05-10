@@ -584,6 +584,23 @@ async function runQuery(
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
+
+      // Phase 4.0.9.1: fallback usage capture — SDK result event in some
+      // configurations emits missing/zero usage despite assistant messages
+      // carrying real values. Capture from assistant messages as fallback;
+      // result-event branch (below) still wins when SDK emits clean usage.
+      // Zero-guard prevents an empty {0,0} from clobbering a previous good
+      // capture; last-write-wins for non-zero values.
+      const asstMsg = message as { message?: { usage?: { input_tokens?: number; output_tokens?: number } } };
+      if (asstMsg.message?.usage) {
+        const u = asstMsg.message.usage;
+        if (typeof u.input_tokens === 'number' && u.input_tokens > 0) {
+          resultUsage.input_tokens = u.input_tokens;
+        }
+        if (typeof u.output_tokens === 'number' && u.output_tokens > 0) {
+          resultUsage.output_tokens = u.output_tokens;
+        }
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {
