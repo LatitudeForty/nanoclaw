@@ -180,6 +180,36 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Phase 4.0.9: per-task runner-managed ops-log discipline. Move structural
+  // started/completed row writing from per-task LLM-driven Bash into runner
+  // code. Phase 5.0/5.0.b proved per-task overrides cause 4B/9B to skip the
+  // bookkeeping Bash; runner-side writes preserve watchdog parsing while the
+  // LLM's prompt shrinks to the actual procedural work.
+  // - runner_managed_ops_log INTEGER (0/NULL = LLM-driven today, 1 = runner)
+  // - ops_log_path_override TEXT (NULL = global default daily-ops-log.md)
+  // - task_name_override TEXT (canonical snake_case name; required when flag=1)
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN runner_managed_ops_log INTEGER`,
+    );
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN ops_log_path_override TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN task_name_override TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(

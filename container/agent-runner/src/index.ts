@@ -27,6 +27,7 @@ interface ContainerInput {
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
+  taskId?: string;
   assistantName?: string;
   model?: string;
   script?: string;
@@ -38,6 +39,9 @@ interface ContainerInput {
   disallowedMcpTools?: string[];
   settingSourcesOverride?: string[];
   additionalDirectoriesOverride?: string[];
+  runnerManagedOpsLog?: boolean;
+  opsLogPathOverride?: string;
+  taskNameOverride?: string;
 }
 
 interface ContainerOutput {
@@ -334,6 +338,51 @@ function waitForIpcMessage(): Promise<string | null> {
   });
 }
 
+
+/**
+ * Phase 4.0.9: per-task runner-managed ops-log row writing.
+ *
+ * Phase 5.0/5.0.b empirically proved that per-task LLM-driven started/completed
+ * Bash blocks are unreliable under system_prompt_override on the qwen3.5 family
+ * (4B missed completed; 9B skipped both, across all four override variants in
+ * Phase 5.0.b.2). Watchdog (task-watchdog-daily) parses started-without-completed
+ * as CRASHED, so prompt-driven discipline would cry-wolf alert every fire.
+ *
+ * Architectural fix: runner emits the structural rows; LLM's prompt shrinks to
+ * the actual work. Format MUST match the canonical pattern that watchdog parses:
+ *   | YYYY-MM-DD | HH:MM NZT | <task_name> | <model> | <tokens_in> | <tokens_out> | <status> |
+ * Single space padding, pipe-separated, trailing newline. Watchdog treats any
+ * non-'started' status as terminal, so 'completed' (clean) and 'crashed'
+ * (SDK error or non-success result) both count as the row pair's closer.
+ */
+async function appendOpsLogRow(
+  opsLogPath: string,
+  taskName: string,
+  model: string,
+  status: 'started' | 'completed' | 'crashed',
+  tokensIn: number,
+  tokensOut: number,
+): Promise<void> {
+  const dateFmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Pacific/Auckland',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const timeFmt = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Pacific/Auckland',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  const now = new Date();
+  const D = dateFmt.format(now);
+  const T = timeFmt.format(now);
+  const row = `| ${D} | ${T} NZT | ${taskName} | ${model} | ${tokensIn} | ${tokensOut} | ${status} |
+`;
+  await fs.promises.appendFile(opsLogPath, row);
+}
+
 /**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
@@ -377,6 +426,52 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
 
+  // Phase 4.0.9: resolve runner-managed ops-log targets once per fire. The
+  // started row writes immediately below; the completed/crashed row writes
+  // in the finally block below the for-await loop.
+  const runnerManaged = !!containerInput.runnerManagedOpsLog;
+  const opsLogPath =
+    containerInput.opsLogPathOverride ||
+    '/workspace/extra/murray-shared/logs/daily-ops-log.md';
+  let opsLogTaskName: string | null = null;
+  if (runnerManaged) {
+    if (containerInput.taskNameOverride) {
+      opsLogTaskName = containerInput.taskNameOverride;
+    } else {
+      // Fail-soft fallback: strip the 'task-' prefix from the task id (e.g.
+      // 'task-cron-self-audit' -> 'cron-self-audit'). Not the canonical
+      // snake_case format, but watchdog parses by timestamp + status, not by
+      // name format, and task-attribution stays intact (chat_jid would be the
+      // recipient, not the task — wrong shape for this purpose). Phase 5.0.d
+      // migration sets the flag and name override atomically, so this branch
+      // should only fire on a half-applied migration; the WARN log makes that
+      // visible in production logs.
+      const rawId = containerInput.taskId || 'unknown-task';
+      const fallback = rawId.startsWith('task-') ? rawId.slice('task-'.length) : rawId;
+      log(
+        `WARN: runner_managed_ops_log=1 but task_name_override is null; using fallback name '${fallback}' (derived from task id '${rawId}')`,
+      );
+      opsLogTaskName = fallback;
+    }
+  }
+  const opsLogModel = containerInput.model || 'unknown';
+  let resultUsage: { input_tokens: number; output_tokens: number } = {
+    input_tokens: 0,
+    output_tokens: 0,
+  };
+  let sdkStatus: 'completed' | 'crashed' = 'completed';
+
+  if (runnerManaged && opsLogTaskName) {
+    try {
+      await appendOpsLogRow(opsLogPath, opsLogTaskName, opsLogModel, 'started', 0, 0);
+    } catch (err) {
+      // Don't crash the SDK call if ops-log write fails (path missing, perms);
+      // log and continue. Watchdog will see no started row and treat as MISSING.
+      log(`WARN: failed to write started ops-log row: ${(err as Error).message}`);
+    }
+  }
+
+
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
@@ -400,6 +495,7 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  try {
   for await (const message of query({
     prompt: stream,
     options: {
@@ -504,6 +600,21 @@ async function runQuery(
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      // Phase 4.0.9: capture usage + sdkStatus for the runner-managed terminal row.
+      const resultMsg = message as {
+        subtype?: string;
+        is_error?: boolean;
+        usage?: { input_tokens?: number; output_tokens?: number };
+      };
+      if (resultMsg.usage) {
+        resultUsage = {
+          input_tokens: resultMsg.usage.input_tokens ?? 0,
+          output_tokens: resultMsg.usage.output_tokens ?? 0,
+        };
+      }
+      if (resultMsg.subtype !== 'success' || resultMsg.is_error) {
+        sdkStatus = 'crashed';
+      }
       writeOutput({
         status: 'success',
         result: textResult || null,
@@ -512,6 +623,25 @@ async function runQuery(
     }
   }
 
+  } catch (err) {
+    sdkStatus = 'crashed';
+    throw err;
+  } finally {
+    if (runnerManaged && opsLogTaskName) {
+      try {
+        await appendOpsLogRow(
+          opsLogPath,
+          opsLogTaskName,
+          opsLogModel,
+          sdkStatus,
+          resultUsage.input_tokens,
+          resultUsage.output_tokens,
+        );
+      } catch (err) {
+        log(`WARN: failed to write ${sdkStatus} ops-log row: ${(err as Error).message}`);
+      }
+    }
+  }
   ipcPolling = false;
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
   return { newSessionId, lastAssistantUuid, closedDuringQuery };

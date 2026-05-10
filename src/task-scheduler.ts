@@ -180,6 +180,7 @@ async function runTask(
         chatJid: task.chat_jid,
         isMain,
         isScheduledTask: true,
+        taskId: task.id,
         assistantName: ASSISTANT_NAME,
         model: task.model || undefined,
         script: task.script || undefined,
@@ -197,6 +198,9 @@ async function runTask(
         additionalDirectoriesOverride: task.additional_directories_override
           ? JSON.parse(task.additional_directories_override)
           : undefined,
+        runnerManagedOpsLog: task.runner_managed_ops_log === 1,
+        opsLogPathOverride: task.ops_log_path_override || undefined,
+        taskNameOverride: task.task_name_override || undefined,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),

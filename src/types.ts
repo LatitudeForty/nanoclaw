@@ -72,6 +72,9 @@ export interface ScheduledTask {
   disallowed_mcp_tools?: string | null;
   setting_sources_override?: string | null;
   additional_directories_override?: string | null;
+  runner_managed_ops_log?: number | null;
+  ops_log_path_override?: string | null;
+  task_name_override?: string | null;
   next_run: string | null;
   last_run: string | null;
   last_result: string | null;
