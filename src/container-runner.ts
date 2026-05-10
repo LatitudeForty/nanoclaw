@@ -46,6 +46,7 @@ export interface ContainerInput {
   authToken?: string;
   systemPromptOverride?: string;
   toolsOverride?: string[];
+  disallowedMcpTools?: string[];
 }
 
 export interface ContainerOutput {

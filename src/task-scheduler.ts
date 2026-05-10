@@ -188,6 +188,9 @@ async function runTask(
         authToken: task.auth_token || undefined,
         systemPromptOverride: task.system_prompt_override || undefined,
         toolsOverride: task.tools_override ? JSON.parse(task.tools_override) : undefined,
+        disallowedMcpTools: task.disallowed_mcp_tools
+          ? JSON.parse(task.disallowed_mcp_tools)
+          : undefined,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),

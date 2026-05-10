@@ -142,6 +142,20 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Per-task disallowed MCP tools (Phase 4.0.7). When set, the runner
+  // forwards these names to Options.disallowedTools, removing their
+  // schemas from the model context and stripping the unconditional
+  // nanoclaw MCP tool-schema tax. Phase 4.0.7.1 Probe F: disallowedTools
+  // = [all 8 nanoclaw tools] -> 157 tokens (vs 2271 with all 8
+  // advertised). NULL = today behaviour.
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN disallowed_mcp_tools TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(

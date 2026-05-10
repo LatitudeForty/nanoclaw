@@ -69,6 +69,7 @@ export interface ScheduledTask {
   auth_token?: string | null;
   system_prompt_override?: string | null;
   tools_override?: string | null;
+  disallowed_mcp_tools?: string | null;
   next_run: string | null;
   last_run: string | null;
   last_result: string | null;

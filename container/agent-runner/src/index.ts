@@ -35,6 +35,7 @@ interface ContainerInput {
   authToken?: string;
   systemPromptOverride?: string;
   toolsOverride?: string[];
+  disallowedMcpTools?: string[];
 }
 
 interface ContainerOutput {
@@ -437,6 +438,13 @@ async function runQuery(
         'NotebookEdit',
         'mcp__nanoclaw__*'
       ],
+      // Per-task MCP-tool blocklist (Phase 4.0.7). Removes the listed
+      // mcp__nanoclaw__* schemas from the model context, dropping the
+      // unconditional nanoclaw MCP tool-schema tax for tool-light tasks.
+      // Phase 4.0.7.1 Probe F: disallowedTools=[all 8 nanoclaw tools]
+      // -> 157 tokens (vs 2271 with all 8 advertised). NULL/undefined =
+      // advertise all 8 (today behaviour).
+      disallowedTools: containerInput.disallowedMcpTools,
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
