@@ -47,6 +47,8 @@ export interface ContainerInput {
   systemPromptOverride?: string;
   toolsOverride?: string[];
   disallowedMcpTools?: string[];
+  settingSourcesOverride?: string[];
+  additionalDirectoriesOverride?: string[];
 }
 
 export interface ContainerOutput {

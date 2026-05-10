@@ -191,6 +191,12 @@ async function runTask(
         disallowedMcpTools: task.disallowed_mcp_tools
           ? JSON.parse(task.disallowed_mcp_tools)
           : undefined,
+        settingSourcesOverride: task.setting_sources_override
+          ? JSON.parse(task.setting_sources_override)
+          : undefined,
+        additionalDirectoriesOverride: task.additional_directories_override
+          ? JSON.parse(task.additional_directories_override)
+          : undefined,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),

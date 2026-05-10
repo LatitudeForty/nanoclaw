@@ -36,6 +36,8 @@ interface ContainerInput {
   systemPromptOverride?: string;
   toolsOverride?: string[];
   disallowedMcpTools?: string[];
+  settingSourcesOverride?: string[];
+  additionalDirectoriesOverride?: string[];
 }
 
 interface ContainerOutput {
@@ -402,7 +404,14 @@ async function runQuery(
     prompt: stream,
     options: {
       cwd: '/workspace/group',
-      additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
+      // Per-task additionalDirectories override (Phase 4.0.8). When set
+      // (including to []), replaces the discovered /workspace/extra/* dirs.
+      // [] = no extra-directory scan; useful for tool-light tasks like
+      // cron-self-audit that don't need peripheral CLAUDE.md files. NULL/
+      // unset = today behaviour (scan /workspace/extra/*).
+      additionalDirectories: containerInput.additionalDirectoriesOverride !== undefined
+        ? containerInput.additionalDirectoriesOverride
+        : (extraDirs.length > 0 ? extraDirs : undefined),
       // Workaround for https://github.com/anthropics/claude-agent-sdk-typescript/issues/306
       // SDK 0.2.119 mis-selects linux-arm64-musl on Debian glibc arm64.
       pathToClaudeCodeExecutable: process.platform === 'linux' && process.arch === 'arm64'
@@ -448,7 +457,15 @@ async function runQuery(
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      settingSources: ['project', 'user'],
+      // Per-task settingSources override (Phase 4.0.8). [] = SDK isolation
+      // mode per the SDK doc: disables filesystem settings/CLAUDE.md
+      // discovery, stripping the bulk of the ~10.4k container-only plumbing
+      // residual that survived Phase 4.0/4.0.7 (Probe K floor 157 tokens vs
+      // ~10-11k with default ['project','user']). NULL/unset = today
+      // behaviour.
+      settingSources: containerInput.settingSourcesOverride !== undefined
+        ? (containerInput.settingSourcesOverride as ('user' | 'project' | 'local')[])
+        : ['project', 'user'],
       mcpServers: {
         nanoclaw: {
           command: 'node',

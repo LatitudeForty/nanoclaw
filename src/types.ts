@@ -70,6 +70,8 @@ export interface ScheduledTask {
   system_prompt_override?: string | null;
   tools_override?: string | null;
   disallowed_mcp_tools?: string | null;
+  setting_sources_override?: string | null;
+  additional_directories_override?: string | null;
   next_run: string | null;
   last_run: string | null;
   last_result: string | null;

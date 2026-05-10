@@ -156,6 +156,30 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Per-task SDK settingSources + additionalDirectories overrides (Phase 4.0.8).
+  // settingSources=[] disables filesystem settings discovery (SDK isolation
+  // mode per the SDK doc), stripping the project/user CLAUDE.md and
+  // settings.json scans that account for ~7-8k of the ~10.4k container-only
+  // plumbing residual after Phase 4.0/4.0.7. additionalDirectories=[]
+  // suppresses the /workspace/extra/* scan that loads peripheral CLAUDE.md
+  // files. NULL on either = today behaviour (settingSources defaults to
+  // ['project','user']; additionalDirectories defaults to discovered
+  // /workspace/extra/* dirs). Both are JSON-array-string format.
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN setting_sources_override TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN additional_directories_override TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(
