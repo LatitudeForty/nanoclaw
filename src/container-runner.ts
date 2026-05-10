@@ -44,6 +44,8 @@ export interface ContainerInput {
   baseUrl?: string;
   apiKey?: string;
   authToken?: string;
+  systemPromptOverride?: string;
+  toolsOverride?: string[];
 }
 
 export interface ContainerOutput {

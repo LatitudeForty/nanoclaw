@@ -33,6 +33,8 @@ interface ContainerInput {
   baseUrl?: string;
   apiKey?: string;
   authToken?: string;
+  systemPromptOverride?: string;
+  toolsOverride?: string[];
 }
 
 interface ContainerOutput {
@@ -408,9 +410,23 @@ async function runQuery(
       model: containerInput.model || undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, excludeDynamicSections: true, append: globalClaudeMd }
-        : { type: 'preset' as const, preset: 'claude_code' as const, excludeDynamicSections: true },
+      // Per-task systemPrompt override: when set, replace the claude_code preset
+      // with a raw custom string. Drops the ~6-8k preset + ~7.5-8k CLAUDE.md
+      // append from the bundle. Phase 4.0.1 probes confirmed an empty user
+      // prompt with custom systemPrompt + tools:[] sends ~158 tokens vs
+      // ~37-40k baseline.
+      systemPrompt: containerInput.systemPromptOverride
+        ? containerInput.systemPromptOverride
+        : (globalClaudeMd
+          ? { type: 'preset' as const, preset: 'claude_code' as const, excludeDynamicSections: true, append: globalClaudeMd }
+          : { type: 'preset' as const, preset: 'claude_code' as const, excludeDynamicSections: true }),
+      // Per-task tools override: when set, restrict the SDK Options.tools field
+      // (the actual built-in-tool schema filter, NOT allowedTools which is
+      // permission-only). Empty array disables all built-in tool schemas.
+      // Phase 4.0.1 probes: tools:[] -> 158 tokens, tools:['Bash'] -> 3286 tokens.
+      tools: containerInput.toolsOverride !== undefined
+        ? containerInput.toolsOverride
+        : undefined,
       allowedTools: [
         'Bash',
         'Read', 'Write', 'Edit', 'Glob', 'Grep',

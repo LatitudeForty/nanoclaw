@@ -126,6 +126,22 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Per-task SDK systemPrompt + tools overrides. When set, the runner replaces
+  // the claude_code preset with a custom systemPrompt string and/or restricts
+  // the advertised tool schemas via Options.tools, shrinking the bundle for
+  // local-LLM cost-shifted tasks. NULL on both = today behaviour (preset with
+  // excludeDynamicSections: true).
+  try {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN system_prompt_override TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN tools_override TEXT`);
+  } catch {
+    /* column already exists */
+  }
+
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(

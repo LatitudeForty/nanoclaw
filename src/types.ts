@@ -67,6 +67,8 @@ export interface ScheduledTask {
   base_url?: string | null;
   api_key?: string | null;
   auth_token?: string | null;
+  system_prompt_override?: string | null;
+  tools_override?: string | null;
   next_run: string | null;
   last_run: string | null;
   last_result: string | null;

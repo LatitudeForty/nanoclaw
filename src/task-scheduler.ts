@@ -186,6 +186,8 @@ async function runTask(
         baseUrl: task.base_url || undefined,
         apiKey: task.api_key || undefined,
         authToken: task.auth_token || undefined,
+        systemPromptOverride: task.system_prompt_override || undefined,
+        toolsOverride: task.tools_override ? JSON.parse(task.tools_override) : undefined,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
