@@ -33,6 +33,12 @@ ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 # Install agent-browser and claude-code globally
 RUN npm install -g agent-browser @anthropic-ai/claude-code
 
+# Phase 4.3 (2026-05-11): install Exa MCP server globally so npx -y resolves
+# the cached binary at fire time instead of paying the ~3-5s cold-fetch tax
+# on every cron firing. The runner spawns exa-mcp-server via npx; with a
+# global install npx finds it on PATH and skips the registry round-trip.
+RUN npm install -g exa-mcp-server@latest
+
 # Create app directory
 WORKDIR /app
 

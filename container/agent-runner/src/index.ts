@@ -572,6 +572,19 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        // Phase 4.3: register Exa stdio MCP for web search on local-model
+        // tasks when EXA_API_KEY is set. Anthropic native web_search server
+        // tool doesn't fire over the Ollama proxy rail. Per-task allow/disallow
+        // via the existing disallowed_mcp_tools column. Graceful absence when
+        // EXA_API_KEY unset — spread is empty so today's behaviour is preserved.
+        ...(process.env.EXA_API_KEY ? {
+          exa: {
+            type: 'stdio' as const,
+            command: 'npx',
+            args: ['-y', 'exa-mcp-server'],
+            env: { EXA_API_KEY: process.env.EXA_API_KEY },
+          },
+        } : {}),
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
@@ -740,6 +753,10 @@ async function main(): Promise<void> {
   if (containerInput.baseUrl) sdkEnv.ANTHROPIC_BASE_URL = containerInput.baseUrl;
   if (containerInput.apiKey) sdkEnv.ANTHROPIC_API_KEY = containerInput.apiKey;
   if (containerInput.authToken) sdkEnv.ANTHROPIC_AUTH_TOKEN = containerInput.authToken;
+  // Phase 4.3: make EXA_API_KEY explicit in sdkEnv (already in process.env
+  // spread, redundant but grep-able for future audit). Required by the Exa
+  // stdio MCP server's env passthrough above.
+  if (process.env.EXA_API_KEY) sdkEnv.EXA_API_KEY = process.env.EXA_API_KEY;
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
