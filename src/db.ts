@@ -212,6 +212,20 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Stream D (18 May 2026 diagnosis, handoff_2026-05-18): per-task control of
+  // whether the agent's final assistant turn is delivered to chat_jid. The
+  // NanoClaw runner unconditionally Telegrams the final turn; utility tasks
+  // (heartbeat, dossier-sync, murray-scanner, cron-self-audit, watchdog) are
+  // ops-log-only and their mandated final status line was leaking as noise.
+  // 1/NULL = deliver as before (backwards compatible); 0 = ops-log only.
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN deliver_final_turn INTEGER DEFAULT 1`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(

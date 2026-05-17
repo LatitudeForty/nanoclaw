@@ -209,8 +209,15 @@ async function runTask(
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          // Stream D (handoff_2026-05-18 diagnosis): utility tasks set
+          // deliver_final_turn=0 to suppress the noise of the runner
+          // auto-Telegramming their mandated final status line. Result is
+          // still captured above for the ops log; only chat delivery is gated.
+          // 1/NULL (default) = deliver as before (backwards compatible).
+          if (task.deliver_final_turn !== 0) {
+            // Forward result to user (sendMessage handles formatting)
+            await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          }
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {

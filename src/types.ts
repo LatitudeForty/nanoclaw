@@ -75,6 +75,7 @@ export interface ScheduledTask {
   runner_managed_ops_log?: number | null;
   ops_log_path_override?: string | null;
   task_name_override?: string | null;
+  deliver_final_turn?: number | null;
   next_run: string | null;
   last_run: string | null;
   last_result: string | null;
