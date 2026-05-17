@@ -132,7 +132,9 @@ function createSchema(database: Database.Database): void {
   // local-LLM cost-shifted tasks. NULL on both = today behaviour (preset with
   // excludeDynamicSections: true).
   try {
-    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN system_prompt_override TEXT`);
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN system_prompt_override TEXT`,
+    );
   } catch {
     /* column already exists */
   }

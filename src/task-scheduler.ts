@@ -188,7 +188,9 @@ async function runTask(
         apiKey: task.api_key || undefined,
         authToken: task.auth_token || undefined,
         systemPromptOverride: task.system_prompt_override || undefined,
-        toolsOverride: task.tools_override ? JSON.parse(task.tools_override) : undefined,
+        toolsOverride: task.tools_override
+          ? JSON.parse(task.tools_override)
+          : undefined,
         disallowedMcpTools: task.disallowed_mcp_tools
           ? JSON.parse(task.disallowed_mcp_tools)
           : undefined,
