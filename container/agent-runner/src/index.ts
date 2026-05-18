@@ -27,9 +27,21 @@ interface ContainerInput {
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
+  taskId?: string;
   assistantName?: string;
   model?: string;
   script?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  authToken?: string;
+  systemPromptOverride?: string;
+  toolsOverride?: string[];
+  disallowedMcpTools?: string[];
+  settingSourcesOverride?: string[];
+  additionalDirectoriesOverride?: string[];
+  runnerManagedOpsLog?: boolean;
+  opsLogPathOverride?: string;
+  taskNameOverride?: string;
 }
 
 interface ContainerOutput {
@@ -326,6 +338,51 @@ function waitForIpcMessage(): Promise<string | null> {
   });
 }
 
+
+/**
+ * Phase 4.0.9: per-task runner-managed ops-log row writing.
+ *
+ * Phase 5.0/5.0.b empirically proved that per-task LLM-driven started/completed
+ * Bash blocks are unreliable under system_prompt_override on the qwen3.5 family
+ * (4B missed completed; 9B skipped both, across all four override variants in
+ * Phase 5.0.b.2). Watchdog (task-watchdog-daily) parses started-without-completed
+ * as CRASHED, so prompt-driven discipline would cry-wolf alert every fire.
+ *
+ * Architectural fix: runner emits the structural rows; LLM's prompt shrinks to
+ * the actual work. Format MUST match the canonical pattern that watchdog parses:
+ *   | YYYY-MM-DD | HH:MM NZT | <task_name> | <model> | <tokens_in> | <tokens_out> | <status> |
+ * Single space padding, pipe-separated, trailing newline. Watchdog treats any
+ * non-'started' status as terminal, so 'completed' (clean) and 'crashed'
+ * (SDK error or non-success result) both count as the row pair's closer.
+ */
+async function appendOpsLogRow(
+  opsLogPath: string,
+  taskName: string,
+  model: string,
+  status: 'started' | 'completed' | 'crashed',
+  tokensIn: number,
+  tokensOut: number,
+): Promise<void> {
+  const dateFmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Pacific/Auckland',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const timeFmt = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Pacific/Auckland',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  const now = new Date();
+  const D = dateFmt.format(now);
+  const T = timeFmt.format(now);
+  const row = `| ${D} | ${T} NZT | ${taskName} | ${model} | ${tokensIn} | ${tokensOut} | ${status} |
+`;
+  await fs.promises.appendFile(opsLogPath, row);
+}
+
 /**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
@@ -369,6 +426,52 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
 
+  // Phase 4.0.9: resolve runner-managed ops-log targets once per fire. The
+  // started row writes immediately below; the completed/crashed row writes
+  // in the finally block below the for-await loop.
+  const runnerManaged = !!containerInput.runnerManagedOpsLog;
+  const opsLogPath =
+    containerInput.opsLogPathOverride ||
+    '/workspace/extra/murray-shared/logs/daily-ops-log.md';
+  let opsLogTaskName: string | null = null;
+  if (runnerManaged) {
+    if (containerInput.taskNameOverride) {
+      opsLogTaskName = containerInput.taskNameOverride;
+    } else {
+      // Fail-soft fallback: strip the 'task-' prefix from the task id (e.g.
+      // 'task-cron-self-audit' -> 'cron-self-audit'). Not the canonical
+      // snake_case format, but watchdog parses by timestamp + status, not by
+      // name format, and task-attribution stays intact (chat_jid would be the
+      // recipient, not the task — wrong shape for this purpose). Phase 5.0.d
+      // migration sets the flag and name override atomically, so this branch
+      // should only fire on a half-applied migration; the WARN log makes that
+      // visible in production logs.
+      const rawId = containerInput.taskId || 'unknown-task';
+      const fallback = rawId.startsWith('task-') ? rawId.slice('task-'.length) : rawId;
+      log(
+        `WARN: runner_managed_ops_log=1 but task_name_override is null; using fallback name '${fallback}' (derived from task id '${rawId}')`,
+      );
+      opsLogTaskName = fallback;
+    }
+  }
+  const opsLogModel = containerInput.model || 'unknown';
+  let resultUsage: { input_tokens: number; output_tokens: number } = {
+    input_tokens: 0,
+    output_tokens: 0,
+  };
+  let sdkStatus: 'completed' | 'crashed' = 'completed';
+
+  if (runnerManaged && opsLogTaskName) {
+    try {
+      await appendOpsLogRow(opsLogPath, opsLogTaskName, opsLogModel, 'started', 0, 0);
+    } catch (err) {
+      // Don't crash the SDK call if ops-log write fails (path missing, perms);
+      // log and continue. Watchdog will see no started row and treat as MISSING.
+      log(`WARN: failed to write started ops-log row: ${(err as Error).message}`);
+    }
+  }
+
+
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
@@ -392,16 +495,43 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  try {
   for await (const message of query({
     prompt: stream,
     options: {
       cwd: '/workspace/group',
-      additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
+      // Per-task additionalDirectories override (Phase 4.0.8). When set
+      // (including to []), replaces the discovered /workspace/extra/* dirs.
+      // [] = no extra-directory scan; useful for tool-light tasks like
+      // cron-self-audit that don't need peripheral CLAUDE.md files. NULL/
+      // unset = today behaviour (scan /workspace/extra/*).
+      additionalDirectories: containerInput.additionalDirectoriesOverride !== undefined
+        ? containerInput.additionalDirectoriesOverride
+        : (extraDirs.length > 0 ? extraDirs : undefined),
+      // Workaround for https://github.com/anthropics/claude-agent-sdk-typescript/issues/306
+      // SDK 0.2.119 mis-selects linux-arm64-musl on Debian glibc arm64.
+      pathToClaudeCodeExecutable: process.platform === 'linux' && process.arch === 'arm64'
+        ? '/app/node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64/claude'
+        : undefined,
       model: containerInput.model || undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
+      // Per-task systemPrompt override: when set, replace the claude_code preset
+      // with a raw custom string. Drops the ~6-8k preset + ~7.5-8k CLAUDE.md
+      // append from the bundle. Phase 4.0.1 probes confirmed an empty user
+      // prompt with custom systemPrompt + tools:[] sends ~158 tokens vs
+      // ~37-40k baseline.
+      systemPrompt: containerInput.systemPromptOverride
+        ? containerInput.systemPromptOverride
+        : (globalClaudeMd
+          ? { type: 'preset' as const, preset: 'claude_code' as const, excludeDynamicSections: true, append: globalClaudeMd }
+          : { type: 'preset' as const, preset: 'claude_code' as const, excludeDynamicSections: true }),
+      // Per-task tools override: when set, restrict the SDK Options.tools field
+      // (the actual built-in-tool schema filter, NOT allowedTools which is
+      // permission-only). Empty array disables all built-in tool schemas.
+      // Phase 4.0.1 probes: tools:[] -> 158 tokens, tools:['Bash'] -> 3286 tokens.
+      tools: containerInput.toolsOverride !== undefined
+        ? containerInput.toolsOverride
         : undefined,
       allowedTools: [
         'Bash',
@@ -413,10 +543,25 @@ async function runQuery(
         'NotebookEdit',
         'mcp__nanoclaw__*'
       ],
+      // Per-task MCP-tool blocklist (Phase 4.0.7). Removes the listed
+      // mcp__nanoclaw__* schemas from the model context, dropping the
+      // unconditional nanoclaw MCP tool-schema tax for tool-light tasks.
+      // Phase 4.0.7.1 Probe F: disallowedTools=[all 8 nanoclaw tools]
+      // -> 157 tokens (vs 2271 with all 8 advertised). NULL/undefined =
+      // advertise all 8 (today behaviour).
+      disallowedTools: containerInput.disallowedMcpTools,
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      settingSources: ['project', 'user'],
+      // Per-task settingSources override (Phase 4.0.8). [] = SDK isolation
+      // mode per the SDK doc: disables filesystem settings/CLAUDE.md
+      // discovery, stripping the bulk of the ~10.4k container-only plumbing
+      // residual that survived Phase 4.0/4.0.7 (Probe K floor 157 tokens vs
+      // ~10-11k with default ['project','user']). NULL/unset = today
+      // behaviour.
+      settingSources: containerInput.settingSourcesOverride !== undefined
+        ? (containerInput.settingSourcesOverride as ('user' | 'project' | 'local')[])
+        : ['project', 'user'],
       mcpServers: {
         nanoclaw: {
           command: 'node',
@@ -427,6 +572,19 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        // Phase 4.3: register Exa stdio MCP for web search on local-model
+        // tasks when EXA_API_KEY is set. Anthropic native web_search server
+        // tool doesn't fire over the Ollama proxy rail. Per-task allow/disallow
+        // via the existing disallowed_mcp_tools column. Graceful absence when
+        // EXA_API_KEY unset — spread is empty so today's behaviour is preserved.
+        ...(process.env.EXA_API_KEY ? {
+          exa: {
+            type: 'stdio' as const,
+            command: 'npx',
+            args: ['-y', 'exa-mcp-server'],
+            env: { EXA_API_KEY: process.env.EXA_API_KEY },
+          },
+        } : {}),
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
@@ -439,6 +597,23 @@ async function runQuery(
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
+
+      // Phase 4.0.9.1: fallback usage capture — SDK result event in some
+      // configurations emits missing/zero usage despite assistant messages
+      // carrying real values. Capture from assistant messages as fallback;
+      // result-event branch (below) still wins when SDK emits clean usage.
+      // Zero-guard prevents an empty {0,0} from clobbering a previous good
+      // capture; last-write-wins for non-zero values.
+      const asstMsg = message as { message?: { usage?: { input_tokens?: number; output_tokens?: number } } };
+      if (asstMsg.message?.usage) {
+        const u = asstMsg.message.usage;
+        if (typeof u.input_tokens === 'number' && u.input_tokens > 0) {
+          resultUsage.input_tokens = u.input_tokens;
+        }
+        if (typeof u.output_tokens === 'number' && u.output_tokens > 0) {
+          resultUsage.output_tokens = u.output_tokens;
+        }
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {
@@ -455,6 +630,21 @@ async function runQuery(
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      // Phase 4.0.9: capture usage + sdkStatus for the runner-managed terminal row.
+      const resultMsg = message as {
+        subtype?: string;
+        is_error?: boolean;
+        usage?: { input_tokens?: number; output_tokens?: number };
+      };
+      if (resultMsg.usage) {
+        resultUsage = {
+          input_tokens: resultMsg.usage.input_tokens ?? 0,
+          output_tokens: resultMsg.usage.output_tokens ?? 0,
+        };
+      }
+      if (resultMsg.subtype !== 'success' || resultMsg.is_error) {
+        sdkStatus = 'crashed';
+      }
       writeOutput({
         status: 'success',
         result: textResult || null,
@@ -463,6 +653,25 @@ async function runQuery(
     }
   }
 
+  } catch (err) {
+    sdkStatus = 'crashed';
+    throw err;
+  } finally {
+    if (runnerManaged && opsLogTaskName) {
+      try {
+        await appendOpsLogRow(
+          opsLogPath,
+          opsLogTaskName,
+          opsLogModel,
+          sdkStatus,
+          resultUsage.input_tokens,
+          resultUsage.output_tokens,
+        );
+      } catch (err) {
+        log(`WARN: failed to write ${sdkStatus} ops-log row: ${(err as Error).message}`);
+      }
+    }
+  }
   ipcPolling = false;
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
@@ -537,6 +746,17 @@ async function main(): Promise<void> {
   // Credentials are injected by the host's credential proxy via ANTHROPIC_BASE_URL.
   // No real secrets exist in the container environment.
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
+
+  // Per-task SDK provider override. When set on the scheduled_tasks row, route
+  // the SDK's spawned claude CLI subprocess to a non-Anthropic endpoint via
+  // env passthrough. Verified against Ollama 0.23.2 in the 9 May 2026 verify-first.
+  if (containerInput.baseUrl) sdkEnv.ANTHROPIC_BASE_URL = containerInput.baseUrl;
+  if (containerInput.apiKey) sdkEnv.ANTHROPIC_API_KEY = containerInput.apiKey;
+  if (containerInput.authToken) sdkEnv.ANTHROPIC_AUTH_TOKEN = containerInput.authToken;
+  // Phase 4.3: make EXA_API_KEY explicit in sdkEnv (already in process.env
+  // spread, redundant but grep-able for future audit). Required by the Exa
+  // stdio MCP server's env passthrough above.
+  if (process.env.EXA_API_KEY) sdkEnv.EXA_API_KEY = process.env.EXA_API_KEY;
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');

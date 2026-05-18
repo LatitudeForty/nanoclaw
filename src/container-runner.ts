@@ -38,9 +38,21 @@ export interface ContainerInput {
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
+  taskId?: string;
   assistantName?: string;
   model?: string;
   script?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  authToken?: string;
+  systemPromptOverride?: string;
+  toolsOverride?: string[];
+  disallowedMcpTools?: string[];
+  settingSourcesOverride?: string[];
+  additionalDirectoriesOverride?: string[];
+  runnerManagedOpsLog?: boolean;
+  opsLogPathOverride?: string;
+  taskNameOverride?: string;
 }
 
 export interface ContainerOutput {

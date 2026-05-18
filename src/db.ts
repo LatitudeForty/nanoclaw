@@ -107,6 +107,125 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Per-task SDK provider override columns. When set, the runner injects them
+  // into Options.env so the SDK's spawned claude CLI subprocess routes to a
+  // non-Anthropic endpoint (e.g. local Ollama). NULL → identical to Anthropic.
+  try {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN base_url TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN api_key TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN auth_token TEXT`);
+  } catch {
+    /* column already exists */
+  }
+
+  // Per-task SDK systemPrompt + tools overrides. When set, the runner replaces
+  // the claude_code preset with a custom systemPrompt string and/or restricts
+  // the advertised tool schemas via Options.tools, shrinking the bundle for
+  // local-LLM cost-shifted tasks. NULL on both = today behaviour (preset with
+  // excludeDynamicSections: true).
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN system_prompt_override TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN tools_override TEXT`);
+  } catch {
+    /* column already exists */
+  }
+
+  // Per-task disallowed MCP tools (Phase 4.0.7). When set, the runner
+  // forwards these names to Options.disallowedTools, removing their
+  // schemas from the model context and stripping the unconditional
+  // nanoclaw MCP tool-schema tax. Phase 4.0.7.1 Probe F: disallowedTools
+  // = [all 8 nanoclaw tools] -> 157 tokens (vs 2271 with all 8
+  // advertised). NULL = today behaviour.
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN disallowed_mcp_tools TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
+  // Per-task SDK settingSources + additionalDirectories overrides (Phase 4.0.8).
+  // settingSources=[] disables filesystem settings discovery (SDK isolation
+  // mode per the SDK doc), stripping the project/user CLAUDE.md and
+  // settings.json scans that account for ~7-8k of the ~10.4k container-only
+  // plumbing residual after Phase 4.0/4.0.7. additionalDirectories=[]
+  // suppresses the /workspace/extra/* scan that loads peripheral CLAUDE.md
+  // files. NULL on either = today behaviour (settingSources defaults to
+  // ['project','user']; additionalDirectories defaults to discovered
+  // /workspace/extra/* dirs). Both are JSON-array-string format.
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN setting_sources_override TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN additional_directories_override TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
+  // Phase 4.0.9: per-task runner-managed ops-log discipline. Move structural
+  // started/completed row writing from per-task LLM-driven Bash into runner
+  // code. Phase 5.0/5.0.b proved per-task overrides cause 4B/9B to skip the
+  // bookkeeping Bash; runner-side writes preserve watchdog parsing while the
+  // LLM's prompt shrinks to the actual procedural work.
+  // - runner_managed_ops_log INTEGER (0/NULL = LLM-driven today, 1 = runner)
+  // - ops_log_path_override TEXT (NULL = global default daily-ops-log.md)
+  // - task_name_override TEXT (canonical snake_case name; required when flag=1)
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN runner_managed_ops_log INTEGER`,
+    );
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN ops_log_path_override TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN task_name_override TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
+  // Stream D (18 May 2026 diagnosis, handoff_2026-05-18): per-task control of
+  // whether the agent's final assistant turn is delivered to chat_jid. The
+  // NanoClaw runner unconditionally Telegrams the final turn; utility tasks
+  // (heartbeat, dossier-sync, murray-scanner, cron-self-audit, watchdog) are
+  // ops-log-only and their mandated final status line was leaking as noise.
+  // 1/NULL = deliver as before (backwards compatible); 0 = ops-log only.
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN deliver_final_turn INTEGER DEFAULT 1`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(

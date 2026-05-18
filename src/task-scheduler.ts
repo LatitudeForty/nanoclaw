@@ -180,17 +180,44 @@ async function runTask(
         chatJid: task.chat_jid,
         isMain,
         isScheduledTask: true,
+        taskId: task.id,
         assistantName: ASSISTANT_NAME,
         model: task.model || undefined,
         script: task.script || undefined,
+        baseUrl: task.base_url || undefined,
+        apiKey: task.api_key || undefined,
+        authToken: task.auth_token || undefined,
+        systemPromptOverride: task.system_prompt_override || undefined,
+        toolsOverride: task.tools_override
+          ? JSON.parse(task.tools_override)
+          : undefined,
+        disallowedMcpTools: task.disallowed_mcp_tools
+          ? JSON.parse(task.disallowed_mcp_tools)
+          : undefined,
+        settingSourcesOverride: task.setting_sources_override
+          ? JSON.parse(task.setting_sources_override)
+          : undefined,
+        additionalDirectoriesOverride: task.additional_directories_override
+          ? JSON.parse(task.additional_directories_override)
+          : undefined,
+        runnerManagedOpsLog: task.runner_managed_ops_log === 1,
+        opsLogPathOverride: task.ops_log_path_override || undefined,
+        taskNameOverride: task.task_name_override || undefined,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          // Stream D (handoff_2026-05-18 diagnosis): utility tasks set
+          // deliver_final_turn=0 to suppress the noise of the runner
+          // auto-Telegramming their mandated final status line. Result is
+          // still captured above for the ops log; only chat delivery is gated.
+          // 1/NULL (default) = deliver as before (backwards compatible).
+          if (task.deliver_final_turn !== 0) {
+            // Forward result to user (sendMessage handles formatting)
+            await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          }
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {

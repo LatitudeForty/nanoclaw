@@ -64,6 +64,18 @@ export interface ScheduledTask {
   schedule_value: string;
   context_mode: 'group' | 'isolated';
   model?: string | null;
+  base_url?: string | null;
+  api_key?: string | null;
+  auth_token?: string | null;
+  system_prompt_override?: string | null;
+  tools_override?: string | null;
+  disallowed_mcp_tools?: string | null;
+  setting_sources_override?: string | null;
+  additional_directories_override?: string | null;
+  runner_managed_ops_log?: number | null;
+  ops_log_path_override?: string | null;
+  task_name_override?: string | null;
+  deliver_final_turn?: number | null;
   next_run: string | null;
   last_run: string | null;
   last_result: string | null;
