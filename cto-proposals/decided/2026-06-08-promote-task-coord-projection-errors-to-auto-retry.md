@@ -1,8 +1,9 @@
 ---
 id: 2026-06-08-promote-task-coord-projection-errors-to-auto-retry
 kind: weekly
-status: proposed
+status: rejected
 created: 2026-06-08
+decided: 2026-06-08 (Michael)
 target: "task-orchestrator retry config + task-queue-cleanup prompt"
 goal: "hedge-fund"
 change_type: "incremental"

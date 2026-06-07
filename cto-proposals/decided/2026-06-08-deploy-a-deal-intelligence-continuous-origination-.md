@@ -1,8 +1,9 @@
 ---
 id: 2026-06-08-deploy-a-deal-intelligence-continuous-origination-
 kind: weekly
-status: proposed
+status: rejected
 created: 2026-06-08
+decided: 2026-06-08 (Michael)
 target: "New task-di-origination (haiku-4-5, 3\u00d7/day weekdays) + orchestrator queue trigger for deck generation"
 goal: "deal-intelligence"
 change_type: "step-change"
