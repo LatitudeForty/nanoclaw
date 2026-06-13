@@ -22,6 +22,7 @@ import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { recordSpend } from './spend-tracker.js';
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
@@ -68,6 +69,19 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+
+// Post-trip remediation (2026-06-13, Item A): conversational spend attribution.
+// The conversational Telegram reply loop runs the container with no model
+// override, so it uses the SDK default. Confirmed via session transcripts to be
+// claude-sonnet-4-6; priced via the sonnet family rate in spend-tracker (stable
+// across version bumps). If Anthropic changes the SDK default tier, update this.
+// (Capturing the exact per-turn model from the SDK message would need an
+// agent-image rebuild — deferred; see PostTrip_Remediation_Report_2026-06-13.)
+const CONVERSATION_DEFAULT_MODEL = 'claude-sonnet-4-6';
+// Monotonic per-process sequence so each conversational turn gets a unique
+// spend.db fire_id even when the SDK reuses a session id across resumed turns
+// (one runContainerAgent spans many piped turns).
+let convoFireSeq = 0;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
@@ -325,6 +339,27 @@ async function runAgent(
         if (output.newSessionId) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
+        }
+        // Post-trip remediation (2026-06-13, Item A): record conversational
+        // spend per turn. The scheduled-task path (task-scheduler.ts) records
+        // spend per fire, but the conversational reply loop never did — so its
+        // turns (full-context-per-turn Sonnet, the largest variable cost) were
+        // invisible to spend.db AND to the in-container $5/day cap that sums it.
+        // One runContainerAgent spans many piped turns; each result marker
+        // carries that turn's own usage. recordSpend is observability-safe
+        // (never throws). Honest attribution: task_id = conversation:<group>.
+        if (
+          output.usage &&
+          output.newSessionId &&
+          (output.usage.input_tokens > 0 || output.usage.output_tokens > 0)
+        ) {
+          convoFireSeq += 1;
+          await recordSpend({
+            taskId: `conversation:${group.folder}`,
+            fireId: `${output.newSessionId}:${convoFireSeq}`,
+            model: CONVERSATION_DEFAULT_MODEL,
+            usage: output.usage,
+          });
         }
         await onOutput(output);
       }
