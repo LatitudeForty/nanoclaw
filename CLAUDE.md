@@ -77,3 +77,13 @@ systemctl --user restart nanoclaw
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
+
+---
+
+## Operational context (Michael's deployment — not upstream)
+- **3-repo topology:** `architecture-impl` (MacBook — design/briefs/prompts/schema) ↔ `mini-ops` (Mini — deployed host-side ops scripts + the rollback authority, `bin/deploy.sh`) ↔ this `nanoclaw` (runtime). See `~/code/CLAUDE.md`.
+- **ZERO fork edits is the default** — new capability = host-cron + config + skill + bounded LLM call, never a fork/image edit. Deployed host-side scripts live in `mini-ops`, not here; container-agent behaviour is set via `groups/<grp>/` config + prompts, not `src/` edits.
+- `groups/telegram_main/CLAUDE.md` (~70KB) is the **container-agent memory** — a separate consumer trimmed under its own briefs; do not confuse it with this repo-root dev doc.
+- **coord.db** (`~/murray-shared/state/coord.db`): `status` enum is LOWERCASE (`pending/awaiting_approval/running/done/cancelled/failed/deferred`); check `schema_version` before assuming schema; the **Updater (`updater.py`) is the ONLY writer** (O7). Scheduled tasks live in `store/messages.db` `scheduled_tasks` (update `prompt` via `CAST(prompt AS TEXT)`; bootstrap `next_run` after INSERT).
+- **Config (§1.22):** `config/*.json` (`pricing.json`, `orchestrator.json`, `tool_enforcement.json`) read directly. Model strings — use current (Haiku 4.5 / Sonnet 4.6 / Opus 4.8); `fable-5`/`mythos-5` are suspended, `opus-4-7` fast-mode deprecates 24 Jul.
+- **PUSH BEFORE CLOSING** a session; verify live state before building (`ls`/`PRAGMA` first); evidence-gated verification; NZT everywhere.
